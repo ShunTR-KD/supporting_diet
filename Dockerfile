@@ -1,9 +1,18 @@
 # Dockerfile
-FROM python:3.11-slim
+# 本番用（軽量版）
+# FROM python:3.11-slim
 
 # システム依存のビルドに必要なもの（必要最低限）
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+    # build-essential curl ca-certificates && \
+    # rm -rf /var/lib/apt/lists/*
+
+# 開発用（フル機能版）
+FROM python:3.11
+
+# システム依存のビルドに必要なもの + Git
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl ca-certificates && \
+    curl ca-certificates git openssh-client && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

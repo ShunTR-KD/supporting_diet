@@ -1,117 +1,294 @@
 # main.py
 import streamlit as st
 from datetime import date
+import logging
 
 from initialize import initialize_once
-from components import sidebar_inputs, show_weather_calendar, recipe_card, weekly_table
-from utils import (
-    load_env, fetch_weekly_weather, temp_to_feel, get_season,
-    fetch_top_recipes_by_genre, estimate_recipe_kcal_pfc_openai,
-    generate_cheer, sum_today_kcal, calc_remaining_kcal, insert_meal_log
-)
-from constants import (
-    DEFAULT_TARGET_KCAL, DEFAULT_MEAL_BUDGET_JPY, DEFAULT_LOCATION
-)
+import components as cp
+import constants as ct
+import utils as ut
 
-st.set_page_config(page_title="NutriBuddy", page_icon="🍽️", layout="wide")
+# ログ設定の初期化
+ut.setup_logging()
+logger = logging.getLogger(__name__)
+
+st.set_page_config(page_title="NutriBuddy", page_icon=ct.MEAL_ICONS, layout="wide")
 
 # 初回のみ初期化
+logger.info("=== NutriBuddy アプリケーション開始 ===")
 initialize_once()
-env = load_env()
+env = ut.load_env()
 OPENAI_API_KEY = env["OPENAI_API_KEY"]
 RAKUTEN_APP_ID = env["RAKUTEN_APPLICATION_ID"]
 DB_PATH = env["SQLITE_PATH"]
 
+logger.info("環境変数読み込み完了")
+
 # ヘッダ
-st.title("🍽️ NutriBuddy（ニュートリバディ）")
-st.caption("“あなたの努力を見守り、毎日応援してくれるダイエットパートナー管理栄養士AI”")
+st.title(f"{ct.MEAL_ICONS} NutriBuddy（ニュートリバディ）")
+st.caption("「あなたの努力を見守り、毎日応援してくれる管理栄養士ダイエットパートナーAI」")
+st.info("💡 「レシピ提案」を押せば、あなたにピッタリの料理を提案できます！")
 
 # サイドバー入力
-inputs = sidebar_inputs({
-    "target_kcal": DEFAULT_TARGET_KCAL,
-    "meal_budget": DEFAULT_MEAL_BUDGET_JPY,
-    "meal_budget_unit": "JPY",
-    "location": DEFAULT_LOCATION
+inputs = cp.sidebar_inputs({
+    "target_kcal": ct.DEFAULT_TARGET_KCAL,
+    "meal_budget": ct.DEFAULT_MEAL_BUDGET_JPY,
+    "location": ct.DEFAULT_LOCATION
 })
 
-# 天気
-weather = fetch_weekly_weather(inputs["location"])
-show_weather_calendar(weather)
+logger.info(f"ユーザー設定 - 目標カロリー: {inputs['target_kcal']}kcal, 予算: {inputs['meal_budget']}円, 場所: {inputs['location']}")
+
+# 開発者モード（デバッグ用）
+with st.sidebar.expander("🔧 開発者モード", expanded=False):
+    st.write("**楽天APIデバッグ機能**")
+    
+    if st.button("カテゴリ一覧取得", help="楽天レシピAPIのカテゴリ一覧を取得してログに表示"):
+        if RAKUTEN_APP_ID:
+            with st.spinner("カテゴリ一覧を取得中..."):
+                try:
+                    ut.debug_fetch_and_display_categories(RAKUTEN_APP_ID)
+                    st.success("✅ カテゴリ一覧を取得しました。ログファイルを確認してください。")
+                except Exception as e:
+                    st.error(f"❌ カテゴリ取得エラー: {str(e)}")
+        else:
+            st.warning("RAKUTEN_APPLICATION_IDが設定されていません")
+    
+    if st.button("API テスト実行", help="楽天レシピAPIの包括的なテストを実行"):
+        if RAKUTEN_APP_ID:
+            with st.spinner("APIテストを実行中..."):
+                try:
+                    ut.run_debug_tests(RAKUTEN_APP_ID)
+                    st.success("✅ APIテストが完了しました。ログファイルで詳細を確認できます。")
+                except Exception as e:
+                    st.error(f"❌ APIテストエラー: {str(e)}")
+        else:
+            st.warning("RAKUTEN_APPLICATION_IDが設定されていません")
+    
+    debug_mode = st.checkbox("デバッグモード", help="詳細なログ出力を有効にします")
+    if debug_mode:
+        ut.set_debug_mode(True)
+        st.info("デバッグモードが有効です")
+    else:
+        ut.set_debug_mode(False)
+    
+    st.write("**ログファイル情報**")
+    from datetime import datetime
+    log_file = f"logs/nutribuddy_{datetime.now().strftime('%Y%m%d')}.log"
+    st.code(f"ログファイル: {log_file}")
+
+# 天気情報の表示制御
+show_weather = st.button("🌤️ 天気情報を表示", key="toggle_weather")
+if show_weather or st.session_state.get("weather_visible", False):
+    # ボタンが押された場合は状態を更新
+    if show_weather:
+        st.session_state.weather_visible = not st.session_state.get("weather_visible", False)
+    
+    # 天気情報が表示状態の場合
+    if st.session_state.get("weather_visible", False):
+        with st.expander("🌤️ 今週の天気情報", expanded=True):
+            # 非表示ボタンを追加
+            if st.button("❌ 天気情報を非表示", key="hide_weather"):
+                st.session_state.weather_visible = False
+                st.rerun()
+            
+            logger.info("天気情報取得開始")
+            weather = ut.fetch_weekly_weather(inputs["location"])
+            cp.show_weather_calendar(weather)
+    else:
+        # 非表示の場合は簡易的な天気取得（体感温度のみ）
+        logger.info("体感温度計算用の天気情報取得")
+        weather = ut.fetch_weekly_weather(inputs["location"])
+else:
+    # 初回または非表示状態では簡易的な天気取得
+    logger.info("体感温度計算用の天気情報取得")
+    weather = ut.fetch_weekly_weather(inputs["location"])
 
 # 今日の温度感（今日の最高気温を採用）
 today_feel = "快適"
 try:
     max_list = weather.get("daily", {}).get("temperature_2m_max", [])
     if max_list:
-        today_feel = temp_to_feel(float(max_list[0]))
-except Exception:
-    pass
+        today_feel = ut.temp_to_feel(float(max_list[0]))
+        logger.info(f"今日の体感温度: {today_feel}")
+except Exception as e:
+    logger.warning(f"体感温度計算エラー: {str(e)}")
 
 # 今日の食事状況
-consumed = sum_today_kcal(DB_PATH)
-remaining = calc_remaining_kcal(inputs["target_kcal"], consumed)
-st.metric(label="今日の残り摂取可能カロリー", value=f"{int(remaining)} kcal", delta=f"摂取済み {int(consumed)} kcal")
+logger.info("今日の摂取カロリー計算開始")
+consumed = ut.sum_today_kcal(DB_PATH)
+remaining = ut.calc_remaining_kcal(inputs["target_kcal"], consumed)
 
-# レシピ提案
+# 食事記録後の更新確認
+if "meal_recorded" in st.session_state:
+    if st.session_state.meal_recorded:
+        added_kcal = st.session_state.get("last_added_kcal", 0)
+        st.success(f"食事を記録しました！{added_kcal:.0f}kcal追加 - カロリーが更新されました。")
+        st.session_state.meal_recorded = False
+
+# デバッグ情報表示（開発用）
+# with st.expander("🔧 デバッグ情報", expanded=False):
+#     st.write(f"データベースパス: {DB_PATH}")
+#     st.write(f"今日の日付: {date.today().isoformat()}")
+#     st.write(f"摂取済みカロリー: {consumed:.1f}kcal")
+#     st.write(f"目標カロリー: {inputs['target_kcal']}kcal")
+#     st.write(f"残りカロリー: {remaining:.1f}kcal")
+
+# st.metric(label="今日の残り摂取可能カロリー", value=f"{int(remaining)} kcal", delta=f"摂取済み {int(consumed)} kcal")
+# logger.info(f"摂取済み: {consumed:.1f}kcal, 残り: {remaining:.1f}kcal")
+
+# レシピ提案状態の管理
 if inputs["propose"]:
-    st.subheader("🍳 レシピ提案（上位4件×推定カロリー/PFC）")
-    season = get_season()
-    recipes = fetch_top_recipes_by_genre(inputs["genre"], RAKUTEN_APP_ID)
+    st.session_state.show_recipes = True
+    st.session_state.current_genre = inputs["genre"]
+    st.session_state.current_difficulty = inputs["difficulty"]
+    st.session_state.current_meal_type = inputs["meal_type"]
+    st.session_state.current_budget = inputs["meal_budget"]
+
+# レシピ提案表示（セッション状態で管理）
+if st.session_state.get("show_recipes", False):
+    genre = st.session_state.get("current_genre", inputs["genre"])
+    difficulty = st.session_state.get("current_difficulty", inputs["difficulty"])
+    meal_type = st.session_state.get("current_meal_type", inputs["meal_type"])
+    budget = st.session_state.get("current_budget", inputs["meal_budget"])
+    
+    logger.info(f"レシピ提案表示 - ジャンル: {genre}")
+    st.subheader(f"{ct.RECIPE_ICONS} レシピ提案（上位4件×推定カロリー/PFC）")
+    
+    # クリアボタンを追加
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("レシピを非表示", key="clear_recipes"):
+            st.session_state.show_recipes = False
+            st.rerun()
+    
+    season = ut.get_season()
+    recipes = ut.cached_fetch_top_recipes_by_genre(genre, RAKUTEN_APP_ID)
 
     if not recipes:
+        logger.warning("レシピ取得失敗")
         st.warning("レシピが取得できませんでした。ジャンルやAPI設定を確認してください。")
     else:
+        logger.info(f"レシピ取得成功 - {len(recipes)}件")
+        # バッチ処理でパフォーマンス向上
+        if len(recipes) > 1:
+            logger.info("複数レシピの並行処理開始")
+            with st.status("複数のレシピを並行処理中...", expanded=False) as status:
+                kcal_infos = ut.batch_estimate_recipes_sync(recipes, 
+                    difficulty=difficulty,
+                    budget_jpy=budget,
+                    season=season,
+                    feel=today_feel
+                )
+                logger.info("並行処理完了")
+                status.update(label="以下がおすすめのメニューです！", state="complete")
+        else:
+            st.info("以下がおすすめのメニューです！")
+            kcal_infos = []
+            
         for i, r in enumerate(recipes, start=1):
-            kcal_info = estimate_recipe_kcal_pfc_openai(
-                OPENAI_API_KEY,
-                recipe_name=r.get("recipeName",""),
-                ingredients=r.get("recipeMaterial",[]),
-                method=r.get("recipeIndication") or "",
-                difficulty=inputs["difficulty"],
-                budget_jpy=inputs["meal_budget"],
-                season=season,
-                feel=today_feel
-            )
-            summary = f"{r.get('recipeName','')} / 約{int(kcal_info['kcal'])}kcal / {inputs['genre']} / {inputs['difficulty']} / 予算{inputs['meal_budget']}円 / 体感:{today_feel}"
-            cheer = generate_cheer(OPENAI_API_KEY, summary)
-            recipe_card(i, r, kcal_info, cheer)
+            recipe_name = r.get("recipeName", "")
+            logger.debug(f"レシピ{i}表示処理: {recipe_name}")
+            
+            if i-1 < len(kcal_infos):
+                kcal_info = kcal_infos[i-1]
+            else:
+                # フォールバック: 個別処理
+                logger.info(f"レシピ{i}の個別カロリー推定開始")
+                ingredients_str = ",".join(r.get("recipeMaterial", []))
+                kcal_info = ut.cached_estimate_recipe_kcal_pfc(
+                    recipe_name=recipe_name,
+                    ingredients_str=ingredients_str,
+                    method=r.get("recipeIndication") or "",
+                    difficulty=difficulty,
+                    budget_jpy=budget,
+                    season=season,
+                    feel=today_feel
+                )
+                
+            summary = f"{recipe_name} / 約{int(kcal_info['kcal'])}kcal / {genre} / {difficulty} / 予算{budget}円 / 体感:{today_feel}"
+            cheer = ut.generate_cheer(summary)
+            cp.recipe_card(i, r, kcal_info, cheer)
 
             # 記録ボタン
             col1, col2 = st.columns([1,4])
             with col1:
-                if st.button(f"この料理を{inputs['meal_type']}に記録", key=f"log_{i}"):
-                    insert_meal_log(DB_PATH, inputs["meal_type"], r.get("recipeName","不明"), float(kcal_info["kcal"]))
-                    st.success("食事を記録しました。ページを再読み込みすると残カロリーが更新されます。")
+                button_key = f"log_{i}_{recipe_name[:10]}"  # より一意なキー
+                logger.debug(f"ボタン表示 - キー: {button_key}")
+                
+                if st.button(f"この料理を{meal_type}に記録", key=button_key):
+                    logger.info(f"🔥 食事記録ボタンクリック - レシピ: {recipe_name}, カロリー: {kcal_info['kcal']}")
+                    try:
+                        # デバッグ: 挿入前の状態確認
+                        before_consumed = ut.sum_today_kcal(DB_PATH)
+                        logger.info(f"挿入前摂取カロリー: {before_consumed}kcal")
+                        
+                        # レコード挿入
+                        ut.insert_meal_log(DB_PATH, meal_type, recipe_name, float(kcal_info["kcal"]))
+                        
+                        # デバッグ: 挿入後の状態確認
+                        after_consumed = ut.sum_today_kcal(DB_PATH)
+                        logger.info(f"挿入後摂取カロリー: {after_consumed}kcal")
+                        
+                        # セッション状態で記録完了をマーク
+                        st.session_state.meal_recorded = True
+                        st.session_state.last_added_kcal = float(kcal_info["kcal"])
+                        
+                        # ページを再実行して残カロリーを更新
+                        logger.info("ページ再実行開始")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        logger.error(f"食事記録エラー: {str(e)}")
+                        import traceback
+                        logger.error(f"エラー詳細: {traceback.format_exc()}")
+                        st.error("食事記録に失敗しました。")
             st.divider()
 
 # 1週間の献立
 if inputs["weekly"]:
-    st.subheader("📅 1週間の献立を作成中…")
-    season = get_season()
-    recipes = fetch_top_recipes_by_genre(inputs["genre"], RAKUTEN_APP_ID)
-    rows = []
+    logger.info("週間献立作成開始")
+    recipes = ut.cached_fetch_top_recipes_by_genre(inputs["genre"], RAKUTEN_APP_ID)
+    
     if recipes:
-        # シンプルに同じ上位候補から日替わりで1品ずつ（本実装では重複回避や多様性ロジックを向上）
-        for d in range(7):
-            r = recipes[d % len(recipes)]
-            kcal_info = estimate_recipe_kcal_pfc_openai(
-                OPENAI_API_KEY,
-                recipe_name=r.get("recipeName",""),
-                ingredients=r.get("recipeMaterial",[]),
-                method=r.get("recipeIndication") or "",
-                difficulty=inputs["difficulty"],
-                budget_jpy=inputs["meal_budget"],
-                season=season,
-                feel=today_feel
-            )
-            summary = f"{r.get('recipeName','')} / 約{int(kcal_info['kcal'])}kcal / 日{d+1}"
-            cheer = generate_cheer(OPENAI_API_KEY, summary)
-            rows.append({
-                "日": f"Day {d+1}",
-                "料理名": r.get("recipeName",""),
-                "推定kcal": int(kcal_info["kcal"]),
-                "応援": cheer
-            })
-        weekly_table(rows)
+        logger.info(f"週間献立用レシピ取得: {len(recipes)}件")
+        
+        with st.status("1週間の献立を作成中...", expanded=False) as status:
+            rows = []
+            season = ut.get_season()
+            
+            # シンプルに同じ上位候補から日替わりで1品ずつ（本実装では重複回避や多様性ロジックを向上）
+            for d in range(7):
+                day_num = d + 1
+                r = recipes[d % len(recipes)]
+                recipe_name = r.get("recipeName", "")
+                logger.debug(f"Day{day_num}の献立処理: {recipe_name}")
+                
+                ingredients_str = ",".join(r.get("recipeMaterial", []))
+                kcal_info = ut.cached_estimate_recipe_kcal_pfc(
+                    recipe_name=recipe_name,
+                    ingredients_str=ingredients_str,
+                    method=r.get("recipeIndication") or "",
+                    difficulty=inputs["difficulty"],
+                    budget_jpy=inputs["meal_budget"],
+                    season=season,
+                    feel=today_feel
+                )
+                summary = f"{recipe_name} / 約{int(kcal_info['kcal'])}kcal / 日{day_num}"
+                cheer = ut.generate_cheer(summary)
+                rows.append({
+                    "日": f"Day {day_num}",
+                    "料理名": recipe_name,
+                    "推定kcal": int(kcal_info["kcal"]),
+                    "レシピリンク": r.get("recipeUrl", ""),
+                    "応援": cheer
+                })
+            
+            logger.info("週間献立作成完了")
+            status.update(label="1週間の献立を作成しました！", state="complete")
+        
+        cp.weekly_table(rows)
     else:
+        logger.warning("週間献立作成失敗 - レシピ取得エラー")
         st.warning("献立を作成できませんでした（レシピ取得失敗）。")
+
+logger.info("=== NutriBuddy アプリケーション処理完了 ===")

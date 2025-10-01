@@ -1,6 +1,6 @@
 {
   "name": "NutriBuddy DevContainer",
-  "build": { "dockerfile": "Dockerfile", "context": "." },
+  "build": { "dockerfile": "../Dockerfile", "context": ".." },
   "customizations": {
     "vscode": {
       "extensions": [

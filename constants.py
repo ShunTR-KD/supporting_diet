@@ -15,20 +15,26 @@ MEAL_TYPES = ["朝", "昼", "晩"]
 DIFFICULTY_OPTIONS = ["初心者", "中級者"]
 GENRE_OPTIONS = ["和風", "洋風", "中華"]
 
-# --------- 楽天レシピ API（雛形） ----------
-RAKUTEN_BASE_URL = "https://app.rakuten.co.jp/services/api/Recipe/RecipeCategoryRanking/20170426"
-# 実運用では上記を公式に合わせて更新してください（エンドポイント/バージョンは例）
-# ジャンル→カテゴリIDの仮マップ（実運用時に正確なカテゴリIDへ更新）
+MEAL_ICONS = ":material/restaurant:"
+CUSTOM_ICONS = ":material/settings:"
+SCHEDULE_ICONS = ":material/calendar_today:"
+RECIPE_ICONS = ":material/local_dining:"
+
+# --------- 楽天レシピ サイト ----------
+RAKUTEN_CATEGORY_LIST_URL = "https://app.rakuten.co.jp/services/api/Recipe/CategoryList/20170426"
+RAKUTEN_RANKING_URL = "https://app.rakuten.co.jp/services/api/Recipe/CategoryRanking/20170426"
+
+# カテゴリIDマッピング（楽天レシピAPIの構造に基づく）
 RAKUTEN_GENRE_TO_CATEGORY = {
-    "和風": "30-1",   # 例: 和食系のカテゴリID（仮）
-    "洋風": "27-1",   # 例: 洋食系
-    "中華": "36-1",   # 例: 中華系
+    "和風": "10-275",   # 牛肉カテゴリ（和風料理の代表として一旦仮置き）
+    "洋風": "10-276",   # 豚肉カテゴリ（洋風料理の代表として一旦仮置き）  
+    "中華": "10-277",   # 鶏肉カテゴリ（中華料理の代表として一旦仮置き）
 }
 
 RAKUTEN_TOP_N = 4  # 上位4件
 
-# --------- 天気（Open-Meteo 仮） ----------
-# 都市→緯度経度（簡易、必要に応じて増やしてください）
+# --------- 天気（Open-Meteo） ----------
+# 都市→緯度経度
 CITY_COORDS = {
     "Tokyo": (35.6895, 139.6917),
     "Osaka": (34.6937, 135.5023),
@@ -37,7 +43,7 @@ CITY_COORDS = {
 }
 OPEN_METEO_BASE = "https://api.open-meteo.com/v1/forecast"
 
-# 温度感の閾値（お好みで調整）
+# 温度感の閾値
 TEMP_FEEL_THRESHOLDS = {
     "寒い": 10,
     "涼しい": 18,
