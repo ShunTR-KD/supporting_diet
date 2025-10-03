@@ -29,14 +29,29 @@ st.title(f"{ct.MEAL_ICONS} NutriBuddy（ニュートリバディ）")
 st.caption("「あなたの努力を見守り、毎日応援してくれる管理栄養士ダイエットパートナーAI」")
 st.info("💡 「レシピ提案」を押せば、あなたにピッタリの料理を提案できます！")
 
-# サイドバー入力
+# 今日の摂取カロリー計算（サイドバー表示前に実行）
+logger.info("今日の摂取カロリー計算開始")
+consumed = ut.sum_today_kcal(DB_PATH)
+
+# サイドバー入力（摂取済みカロリーを渡す）
 inputs = cp.sidebar_inputs({
     "target_kcal": ct.DEFAULT_TARGET_KCAL,
     "meal_budget": ct.DEFAULT_MEAL_BUDGET_JPY,
     "location": ct.DEFAULT_LOCATION
-})
+}, consumed)
+
+# 目標カロリーが設定された後に残りカロリーを計算
+remaining = ut.calc_remaining_kcal(inputs["target_kcal"], consumed)
 
 logger.info(f"ユーザー設定 - 目標カロリー: {inputs['target_kcal']}kcal, 予算: {inputs['meal_budget']}円, 場所: {inputs['location']}")
+logger.info(f"摂取済み: {consumed:.1f}kcal, 残り: {remaining:.1f}kcal")
+
+# 食事記録後の更新確認
+if "meal_recorded" in st.session_state:
+    if st.session_state.meal_recorded:
+        added_kcal = st.session_state.get("last_added_kcal", 0)
+        st.success(f"食事を記録しました！{added_kcal:.0f}kcal追加 - カロリーが更新されました。")
+        st.session_state.meal_recorded = False
 
 # 開発者モード（デバッグ用）
 with st.sidebar.expander("🔧 開発者モード", expanded=False):
@@ -113,18 +128,6 @@ try:
 except Exception as e:
     logger.warning(f"体感温度計算エラー: {str(e)}")
 
-# 今日の食事状況
-logger.info("今日の摂取カロリー計算開始")
-consumed = ut.sum_today_kcal(DB_PATH)
-remaining = ut.calc_remaining_kcal(inputs["target_kcal"], consumed)
-
-# 食事記録後の更新確認
-if "meal_recorded" in st.session_state:
-    if st.session_state.meal_recorded:
-        added_kcal = st.session_state.get("last_added_kcal", 0)
-        st.success(f"食事を記録しました！{added_kcal:.0f}kcal追加 - カロリーが更新されました。")
-        st.session_state.meal_recorded = False
-
 # デバッグ情報表示（開発用）
 # with st.expander("🔧 デバッグ情報", expanded=False):
 #     st.write(f"データベースパス: {DB_PATH}")
@@ -162,7 +165,20 @@ if st.session_state.get("show_recipes", False):
             st.rerun()
     
     season = ut.get_season()
-    recipes = ut.cached_fetch_top_recipes_by_genre(genre, RAKUTEN_APP_ID)
+    
+    # 動的カテゴリ検索を使用
+    keyword = inputs.get("search_keyword")
+    search_mode = inputs.get("search_mode", "ジャンル優先")
+    
+    # 検索パラメータの決定
+    if search_mode == "キーワード優先" and keyword:
+        # キーワード重視の検索
+        recipes = ut.fetch_top_recipes_by_genre(keyword, RAKUTEN_APP_ID, keyword)
+        logger.info(f"キーワード優先検索: '{keyword}'")
+    else:
+        # ジャンル優先の検索（従来通り）
+        recipes = ut.fetch_top_recipes_by_genre(genre, RAKUTEN_APP_ID, keyword)
+        logger.info(f"ジャンル優先検索: '{genre}'" + (f" + キーワード: '{keyword}'" if keyword else ""))
 
     if not recipes:
         logger.warning("レシピ取得失敗")
@@ -247,7 +263,15 @@ if st.session_state.get("show_recipes", False):
 # 1週間の献立
 if inputs["weekly"]:
     logger.info("週間献立作成開始")
-    recipes = ut.cached_fetch_top_recipes_by_genre(inputs["genre"], RAKUTEN_APP_ID)
+    
+    # 週間献立でも動的検索を使用
+    keyword = inputs.get("search_keyword")
+    search_mode = inputs.get("search_mode", "ジャンル優先")
+    
+    if search_mode == "キーワード優先" and keyword:
+        recipes = ut.fetch_top_recipes_by_genre(keyword, RAKUTEN_APP_ID, keyword)
+    else:
+        recipes = ut.fetch_top_recipes_by_genre(inputs["genre"], RAKUTEN_APP_ID, keyword)
     
     if recipes:
         logger.info(f"週間献立用レシピ取得: {len(recipes)}件")

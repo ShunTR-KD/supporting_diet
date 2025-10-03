@@ -24,6 +24,12 @@ RECIPE_ICONS = ":material/local_dining:"
 RAKUTEN_CATEGORY_LIST_URL = "https://app.rakuten.co.jp/services/api/Recipe/CategoryList/20170426"
 RAKUTEN_RANKING_URL = "https://app.rakuten.co.jp/services/api/Recipe/CategoryRanking/20170426"
 
+# 楽天API設定
+RAKUTEN_API_DELAY = 1.2  # 楽天APIリクエスト間の基本遅延（秒）
+RAKUTEN_API_RETRY_DELAY = 3.0  # リトライ時の遅延（秒）
+RAKUTEN_API_MAX_RETRIES = 3  # 最大リトライ回数
+RAKUTEN_API_TIMEOUT = 25  # タイムアウト時間（秒）
+
 # カテゴリIDマッピング（楽天レシピAPIの構造に基づく）
 RAKUTEN_GENRE_TO_CATEGORY = {
     "和風": "10-275",   # 牛肉カテゴリ（和風料理の代表として一旦仮置き）
@@ -75,10 +81,12 @@ RECIPE_KCAL_PROMPT = """以下の料理について、1人前の推定カロリ�
 注意: 数値は妥当な範囲で整数または少数。日本の一般的な分量を想定。"""
 
 # 応援メッセージ
-CHEER_PROMPT = """以下の条件に合う、短い1文の応援メッセージを出してください（20〜40文字目安）。
+CHEER_PROMPT = """以下の条件に合う、短い1文の応援メッセージを出してください（30〜50文字目安）。
 条件:
-- ダイエットを頑張る人への共感
+- ダイエットを頑張る人への共感と励まし
+- 提案レシピのダイエット効果を一言で説明（カロリー調整、栄養バランス、満足感など）
 - 今日の提案内容を後押し
 - ポジティブ、やさしい口調
 - 絵文字は1個まで
+- 「〜で」「〜から」などでダイエット効果と応援を自然に繋げる
 提案の要約: {summary}"""

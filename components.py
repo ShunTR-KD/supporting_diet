@@ -10,19 +10,81 @@ import constants as ct
 # ログ設定（utils.pyで初期化済みのロガーを取得）
 logger = logging.getLogger(__name__)
 
-def sidebar_inputs(defaults: dict) -> dict:
+def sidebar_inputs(defaults: dict, consumed_kcal: float = 0) -> dict:
     logger.debug("サイドバー入力処理開始")
+    
+    # 摂取状況を最上部に表示
+    st.sidebar.markdown("### 今日の摂取状況")
+    
+    # 目標カロリーの取得（一時的にデフォルト値を使用）
+    temp_target = defaults["target_kcal"]
+    temp_remaining = temp_target - consumed_kcal
+    
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        st.metric("摂取済み", f"{int(consumed_kcal)}kcal", 
+                 delta=None if consumed_kcal == 0 else f"+{int(consumed_kcal)}", 
+                 help="今日摂取したカロリーの合計")
+    with col2:
+        remaining_color = "normal" if temp_remaining > 200 else "inverse"
+        st.metric("残り", f"{int(temp_remaining)}kcal", 
+                 delta=f"目標 {int(temp_target)}kcal", 
+                 delta_color=remaining_color,
+                 help=f"目標カロリーまであと{int(temp_remaining)}kcal")
+    
+    # 進捗バー
+    progress = max(0, min(1, consumed_kcal / temp_target)) if temp_target > 0 else 0
+    st.sidebar.progress(progress, text=f"進捗: {progress:.1%}")
+    st.sidebar.markdown("---")
+    
+    # 条件入力
     st.sidebar.header(f"{ct.CUSTOM_ICONS} 条件入力")
     target_kcal = st.sidebar.number_input(
         "1日の目標カロリー (kcal)", min_value=800, max_value=4000,
         value=defaults["target_kcal"], step=50
     )
+    
+    # 目標カロリーが変更された場合の再計算と表示更新
+    if target_kcal != temp_target:
+        updated_remaining = target_kcal - consumed_kcal
+        updated_progress = max(0, min(1, consumed_kcal / target_kcal)) if target_kcal > 0 else 0
+        
+        # 更新された値を表示エリアに反映
+        st.sidebar.markdown("**📊 更新された摂取状況**")
+        col1_update, col2_update = st.sidebar.columns(2)
+        with col1_update:
+            st.metric("摂取済み", f"{int(consumed_kcal)}kcal", help="今日摂取したカロリーの合計")
+        with col2_update:
+            remaining_color = "normal" if updated_remaining > 200 else "inverse"
+            st.metric("残り", f"{int(updated_remaining)}kcal", 
+                     delta=f"目標 {int(target_kcal)}kcal", 
+                     delta_color=remaining_color,
+                     help=f"目標カロリーまであと{int(updated_remaining)}kcal")
+        
+        st.sidebar.progress(updated_progress, text=f"更新進捗: {updated_progress:.1%}")
+        st.sidebar.markdown("---")
     meal_budget = st.sidebar.number_input(
         "1食あたりの予算 (円)", min_value=100, max_value=3000,
         value=defaults["meal_budget"], step=50
     )
     difficulty = st.sidebar.selectbox("料理の難易度", ct.DIFFICULTY_OPTIONS, index=0)
     genre = st.sidebar.selectbox("料理ジャンル", ct.GENRE_OPTIONS, index=0)
+    
+    # キーワード検索機能を追加
+    st.sidebar.markdown("**🔍 詳細検索**")
+    search_keyword = st.sidebar.text_input(
+        "料理のキーワード", 
+        placeholder="例: 鶏肉、パスタ、カレー",
+        help="具体的な食材や料理名を入力すると、より精密な検索ができます"
+    )
+    
+    # 検索モード選択
+    search_mode = st.sidebar.radio(
+        "検索方式",
+        ["ジャンル優先", "キーワード優先"],
+        help="ジャンル優先: 選択したジャンル内で検索 / キーワード優先: キーワードを重視した検索"
+    )
+    
     meal_type = st.sidebar.selectbox("食事の区分", ct.MEAL_TYPES, index=1)
     location = st.sidebar.selectbox("地域", ["Tokyo", "Osaka", "Sapporo", "Fukuoka"], index=0)
 
@@ -35,6 +97,8 @@ def sidebar_inputs(defaults: dict) -> dict:
         "meal_budget": int(meal_budget),
         "difficulty": difficulty,
         "genre": genre,
+        "search_keyword": search_keyword.strip() if search_keyword else None,
+        "search_mode": search_mode,
         "meal_type": meal_type,
         "location": location,
         "propose": propose,
