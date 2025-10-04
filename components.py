@@ -67,6 +67,11 @@ def sidebar_inputs(defaults: dict, consumed_kcal: float = 0) -> dict:
         "1食あたりの予算 (円)", min_value=100, max_value=3000,
         value=defaults["meal_budget"], step=50
     )
+    meal_kcal = st.sidebar.number_input(
+        "1食あたりの希望カロリー (kcal)", min_value=200, max_value=1500,
+        value=defaults["meal_kcal"], step=50,
+        help="この値を大幅に超えるレシピ（約100kcal以上）は表示されません"
+    )
     difficulty = st.sidebar.selectbox("料理の難易度", ct.DIFFICULTY_OPTIONS, index=0)
     genre = st.sidebar.selectbox("料理ジャンル", ct.GENRE_OPTIONS, index=0)
     
@@ -95,6 +100,7 @@ def sidebar_inputs(defaults: dict, consumed_kcal: float = 0) -> dict:
     inputs = {
         "target_kcal": int(target_kcal),
         "meal_budget": int(meal_budget),
+        "meal_kcal": int(meal_kcal),
         "difficulty": difficulty,
         "genre": genre,
         "search_keyword": search_keyword.strip() if search_keyword else None,

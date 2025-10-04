@@ -37,6 +37,7 @@ consumed = ut.sum_today_kcal(DB_PATH)
 inputs = cp.sidebar_inputs({
     "target_kcal": ct.DEFAULT_TARGET_KCAL,
     "meal_budget": ct.DEFAULT_MEAL_BUDGET_JPY,
+    "meal_kcal": ct.DEFAULT_MEAL_KCAL,
     "location": ct.DEFAULT_LOCATION
 }, consumed)
 
@@ -196,7 +197,32 @@ if st.session_state.get("show_recipes", False):
                     feel=today_feel
                 )
                 logger.info("並行処理完了")
-                status.update(label="以下がおすすめのメニューです！", state="complete")
+                
+                # カロリーフィルタリング処理
+                meal_kcal_limit = inputs["meal_kcal"]
+                filtered_recipes = []
+                filtered_kcal_infos = []
+                
+                for i, (recipe, kcal_info) in enumerate(zip(recipes, kcal_infos)):
+                    estimated_kcal = kcal_info.get('kcal', 0)
+                    if estimated_kcal <= meal_kcal_limit + 100:  # 希望カロリー+100kcal以内
+                        filtered_recipes.append(recipe)
+                        filtered_kcal_infos.append(kcal_info)
+                        logger.debug(f"レシピ承認: {recipe.get('recipeName', '')} ({estimated_kcal:.0f}kcal <= {meal_kcal_limit + 100}kcal)")
+                    else:
+                        logger.debug(f"レシピ除外: {recipe.get('recipeName', '')} ({estimated_kcal:.0f}kcal > {meal_kcal_limit + 100}kcal)")
+                
+                # フィルタリング後のレシピ数をチェック
+                if len(filtered_recipes) >= 2:
+                    recipes = filtered_recipes
+                    kcal_infos = filtered_kcal_infos
+                    logger.info(f"カロリーフィルタリング完了 - 表示レシピ: {len(recipes)}件")
+                    status.update(label="カロリー条件に合うメニューを選定しました！", state="complete")
+                else:
+                    logger.warning(f"フィルタリング後のレシピが少数({len(filtered_recipes)}件) - 元のレシピを表示")
+                    status.update(label="以下がおすすめのメニューです！", state="complete")
+                    if len(filtered_recipes) > 0:
+                        st.info(f"💡 希望カロリー({meal_kcal_limit}kcal)に完全に合うレシピは{len(filtered_recipes)}件でした。参考として他のレシピも表示します。")
         else:
             st.info("以下がおすすめのメニューです！")
             kcal_infos = []
@@ -220,9 +246,19 @@ if st.session_state.get("show_recipes", False):
                     season=season,
                     feel=today_feel
                 )
-                
+            
+            # カロリー条件チェック（個別処理時）
+            estimated_kcal = kcal_info.get('kcal', 0)
+            meal_kcal_limit = inputs["meal_kcal"]
+            is_over_calorie = estimated_kcal > meal_kcal_limit + 100
+            
             summary = f"{recipe_name} / 約{int(kcal_info['kcal'])}kcal / {genre} / {difficulty} / 予算{budget}円 / 体感:{today_feel}"
             cheer = ut.generate_cheer(summary)
+            
+            # カロリーオーバー時の表示調整
+            if is_over_calorie:
+                st.warning(f"⚠️ このレシピは希望カロリー({meal_kcal_limit}kcal)を{int(estimated_kcal - meal_kcal_limit)}kcal超過しています")
+            
             cp.recipe_card(i, r, kcal_info, cheer)
 
             # 記録ボタン

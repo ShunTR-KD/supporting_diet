@@ -7,6 +7,7 @@ OPENAI_MODEL = "gpt-4o-mini"
 # --------- UI / 初期値 ----------
 DEFAULT_TARGET_KCAL = 1800
 DEFAULT_MEAL_BUDGET_JPY = 500  # 1食あたりの予算
+DEFAULT_MEAL_KCAL = 600       # 1食あたりの希望カロリー
 DEFAULT_DIFFICULTY = "初心者"   # "初心者" / "中級者"
 DEFAULT_GENRE = "和風"          # "和風" / "洋風" / "中華"
 DEFAULT_LOCATION = "Tokyo"
