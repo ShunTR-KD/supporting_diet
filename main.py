@@ -28,6 +28,7 @@ logger.info("環境変数読み込み完了")
 st.title(f"{ct.MEAL_ICONS} NutriBuddy（ニュートリバディ）")
 st.caption("「あなたの努力を見守り、毎日応援してくれる管理栄養士ダイエットパートナーAI」")
 st.info("💡 「レシピ提案」を押せば、あなたにピッタリの料理を提案できます！")
+st.caption("回答は必ずしも正しいとは限りません。重要な情報は確認するようにしてください。")
 
 # 今日の摂取カロリー計算（サイドバー表示前に実行）
 logger.info("今日の摂取カロリー計算開始")
@@ -156,7 +157,12 @@ if st.session_state.get("show_recipes", False):
     budget = st.session_state.get("current_budget", inputs["meal_budget"])
     
     logger.info(f"レシピ提案表示 - ジャンル: {genre}")
-    st.subheader(f"{ct.RECIPE_ICONS} レシピ提案（上位4件×推定カロリー/PFC）")
+    proposal_mode = inputs.get("proposal_mode", ct.DEFAULT_PROPOSAL_MODE)
+    
+    if proposal_mode == "主食+副菜提案":
+        st.subheader(f"{ct.RECIPE_ICONS} 主食+副菜 組み合わせ提案")
+    else:
+        st.subheader(f"{ct.RECIPE_ICONS} レシピ提案（上位4件×推定カロリー/PFC）")
     
     # クリアボタンを追加
     col1, col2 = st.columns([1, 4])
@@ -226,75 +232,149 @@ if st.session_state.get("show_recipes", False):
         else:
             st.info("以下がおすすめのメニューです！")
             kcal_infos = []
+        
+        # 提案モードによる分岐処理
+        if proposal_mode == "主食+副菜提案":
+            # 複数レシピ組み合わせモード
+            logger.info("主食+副菜提案モード開始")
             
-        for i, r in enumerate(recipes, start=1):
-            recipe_name = r.get("recipeName", "")
-            logger.debug(f"レシピ{i}表示処理: {recipe_name}")
+            # より多くのレシピを取得（組み合わせ用）
+            additional_recipes = []
+            side_keywords = ["サラダ", "野菜", "副菜", "おかず"]
             
-            if i-1 < len(kcal_infos):
-                kcal_info = kcal_infos[i-1]
-            else:
-                # フォールバック: 個別処理
-                logger.info(f"レシピ{i}の個別カロリー推定開始")
-                ingredients_str = ",".join(r.get("recipeMaterial", []))
-                kcal_info = ut.cached_estimate_recipe_kcal_pfc(
-                    recipe_name=recipe_name,
-                    ingredients_str=ingredients_str,
-                    method=r.get("recipeIndication") or "",
+            for keyword in side_keywords:
+                extra_recipes = ut.fetch_top_recipes_by_genre(keyword, RAKUTEN_APP_ID, keyword)
+                if extra_recipes:
+                    additional_recipes.extend(extra_recipes[:2])  # 各キーワードから2件
+            
+            # 既存レシピと追加レシピを結合
+            all_recipes = recipes + additional_recipes
+            
+            # 追加レシピのカロリー推定
+            if additional_recipes:
+                logger.info(f"追加レシピ{len(additional_recipes)}件のカロリー推定開始")
+                additional_kcal_infos = ut.batch_estimate_recipes_sync(additional_recipes,
                     difficulty=difficulty,
                     budget_jpy=budget,
                     season=season,
                     feel=today_feel
                 )
+                all_kcal_infos = kcal_infos + additional_kcal_infos
+            else:
+                all_kcal_infos = kcal_infos
             
-            # カロリー条件チェック（個別処理時）
-            estimated_kcal = kcal_info.get('kcal', 0)
-            meal_kcal_limit = inputs["meal_kcal"]
-            is_over_calorie = estimated_kcal > meal_kcal_limit + 100
+            # 組み合わせ検索
+            combinations = ut.find_recipe_combinations(all_recipes, all_kcal_infos, meal_kcal_limit)
             
-            summary = f"{recipe_name} / 約{int(kcal_info['kcal'])}kcal / {genre} / {difficulty} / 予算{budget}円 / 体感:{today_feel}"
-            cheer = ut.generate_cheer(summary)
+            if combinations:
+                logger.info(f"組み合わせ提案: {len(combinations)}件")
+                for i, combo in enumerate(combinations, start=1):
+                    # 組み合わせの応援メッセージ生成
+                    combo_summary = f"{combo['combination_name']} / 合計{int(combo['total_kcal'])}kcal / {combo['type']} / 目標{meal_kcal_limit}kcal"
+                    cheer = ut.generate_cheer(combo_summary)
+                    
+                    # 組み合わせカード表示
+                    cp.recipe_combination_card(i, combo, cheer)
+                    
+                    # 記録ボタン（組み合わせ用）
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        button_key = f"log_combo_{i}_{combo['type']}"
+                        if st.button(f"この組み合わせを{meal_type}に記録", key=button_key):
+                            logger.info(f"🔥 組み合わせ記録ボタンクリック - {combo['combination_name']}, 合計カロリー: {combo['total_kcal']}")
+                            try:
+                                # 各レシピを個別に記録
+                                for recipe_info in combo['recipes']:
+                                    recipe_name = recipe_info['recipe'].get('recipeName', '')
+                                    recipe_kcal = recipe_info['kcal_info'].get('kcal', 0)
+                                    ut.insert_meal_log(DB_PATH, meal_type, recipe_name, float(recipe_kcal))
+                                
+                                # セッション状態で記録完了をマーク
+                                st.session_state.meal_recorded = True
+                                st.session_state.last_added_kcal = float(combo['total_kcal'])
+                                
+                                st.rerun()
+                                
+                            except Exception as e:
+                                logger.error(f"組み合わせ記録エラー: {str(e)}")
+                                st.error("食事記録に失敗しました。")
+                    
+                    st.divider()
+            else:
+                st.warning("適切な組み合わせが見つかりませんでした。1品提案モードをお試しください。")
+        
+        else:
+            # 従来の1品提案モード
+            logger.info("1品提案モード")
             
-            # カロリーオーバー時の表示調整
-            if is_over_calorie:
-                st.warning(f"⚠️ このレシピは希望カロリー({meal_kcal_limit}kcal)を{int(estimated_kcal - meal_kcal_limit)}kcal超過しています")
-            
-            cp.recipe_card(i, r, kcal_info, cheer)
-
-            # 記録ボタン
-            col1, col2 = st.columns([1,4])
-            with col1:
-                button_key = f"log_{i}_{recipe_name[:10]}"  # より一意なキー
-                logger.debug(f"ボタン表示 - キー: {button_key}")
+            for i, r in enumerate(recipes, start=1):
+                recipe_name = r.get("recipeName", "")
+                logger.debug(f"レシピ{i}表示処理: {recipe_name}")
                 
-                if st.button(f"この料理を{meal_type}に記録", key=button_key):
-                    logger.info(f"🔥 食事記録ボタンクリック - レシピ: {recipe_name}, カロリー: {kcal_info['kcal']}")
-                    try:
-                        # デバッグ: 挿入前の状態確認
-                        before_consumed = ut.sum_today_kcal(DB_PATH)
-                        logger.info(f"挿入前摂取カロリー: {before_consumed}kcal")
-                        
-                        # レコード挿入
-                        ut.insert_meal_log(DB_PATH, meal_type, recipe_name, float(kcal_info["kcal"]))
-                        
-                        # デバッグ: 挿入後の状態確認
-                        after_consumed = ut.sum_today_kcal(DB_PATH)
-                        logger.info(f"挿入後摂取カロリー: {after_consumed}kcal")
-                        
-                        # セッション状態で記録完了をマーク
-                        st.session_state.meal_recorded = True
-                        st.session_state.last_added_kcal = float(kcal_info["kcal"])
-                        
-                        # ページを再実行して残カロリーを更新
-                        logger.info("ページ再実行開始")
-                        st.rerun()
-                        
-                    except Exception as e:
-                        logger.error(f"食事記録エラー: {str(e)}")
-                        import traceback
-                        logger.error(f"エラー詳細: {traceback.format_exc()}")
-                        st.error("食事記録に失敗しました。")
-            st.divider()
+                if i-1 < len(kcal_infos):
+                    kcal_info = kcal_infos[i-1]
+                else:
+                    # フォールバック: 個別処理
+                    logger.info(f"レシピ{i}の個別カロリー推定開始")
+                    ingredients_str = ",".join(r.get("recipeMaterial", []))
+                    kcal_info = ut.cached_estimate_recipe_kcal_pfc(
+                        recipe_name=recipe_name,
+                        ingredients_str=ingredients_str,
+                        method=r.get("recipeIndication") or "",
+                        difficulty=difficulty,
+                        budget_jpy=budget,
+                        season=season,
+                        feel=today_feel
+                    )
+                
+                # カロリー条件チェック（個別処理時）
+                estimated_kcal = kcal_info.get('kcal', 0)
+                meal_kcal_limit = inputs["meal_kcal"]
+                is_over_calorie = estimated_kcal > meal_kcal_limit + 100
+                
+                summary = f"{recipe_name} / 約{int(kcal_info['kcal'])}kcal / {genre} / {difficulty} / 予算{budget}円 / 体感:{today_feel}"
+                cheer = ut.generate_cheer(summary)
+                
+                # カロリーオーバー時の表示調整
+                if is_over_calorie:
+                    st.warning(f"⚠️ このレシピは希望カロリー({meal_kcal_limit}kcal)を{int(estimated_kcal - meal_kcal_limit)}kcal超過しています")
+                
+                cp.recipe_card(i, r, kcal_info, cheer)
+
+                # 記録ボタン
+                col1, col2 = st.columns([1,4])
+                with col1:
+                    button_key = f"log_{i}_{recipe_name[:10]}"  # より一意なキー
+                    logger.debug(f"ボタン表示 - キー: {button_key}")
+                    
+                    if st.button(f"この料理を{meal_type}に記録", key=button_key):
+                        logger.info(f"🔥 食事記録ボタンクリック - レシピ: {recipe_name}, カロリー: {kcal_info['kcal']}")
+                        try:
+                            # デバッグ: 挿入前の状態確認
+                            before_consumed = ut.sum_today_kcal(DB_PATH)
+                            logger.info(f"挿入前摂取カロリー: {before_consumed}kcal")
+                            
+                            # レコード挿入
+                            ut.insert_meal_log(DB_PATH, meal_type, recipe_name, float(kcal_info["kcal"]))
+                            
+                            # デバッグ: 挿入後の状態確認
+                            after_consumed = ut.sum_today_kcal(DB_PATH)
+                            logger.info(f"挿入後摂取カロリー: {after_consumed}kcal")
+                            
+                            # セッション状態で記録完了をマーク
+                            st.session_state.meal_recorded = True
+                            st.session_state.last_added_kcal = float(kcal_info["kcal"])
+                            
+                            # ページを再実行して残カロリーを更新
+                            logger.info("ページ再実行開始")
+                            st.rerun()
+                            
+                        except Exception as e:
+                            logger.error(f"食事記録エラー: {str(e)}")
+                            import traceback
+                            logger.error(f"エラー詳細: {traceback.format_exc()}")
+                            st.error("食事記録に失敗しました。")
+                st.divider()
 
 # 1週間の献立
 if inputs["weekly"]:

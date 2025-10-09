@@ -75,6 +75,15 @@ def sidebar_inputs(defaults: dict, consumed_kcal: float = 0) -> dict:
     difficulty = st.sidebar.selectbox("料理の難易度", ct.DIFFICULTY_OPTIONS, index=0)
     genre = st.sidebar.selectbox("料理ジャンル", ct.GENRE_OPTIONS, index=0)
     
+    # 提案モード選択を追加
+    st.sidebar.markdown("**🍽️ 提案モード**")
+    proposal_mode = st.sidebar.radio(
+        "レシピ提案の種類",
+        ct.PROPOSAL_MODES,
+        index=0,
+        help="1品提案: 主菜のみ / 主食+副菜提案: バランスの良い組み合わせ"
+    )
+    
     # キーワード検索機能を追加
     st.sidebar.markdown("**🔍 詳細検索**")
     search_keyword = st.sidebar.text_input(
@@ -103,6 +112,7 @@ def sidebar_inputs(defaults: dict, consumed_kcal: float = 0) -> dict:
         "meal_kcal": int(meal_kcal),
         "difficulty": difficulty,
         "genre": genre,
+        "proposal_mode": proposal_mode,
         "search_keyword": search_keyword.strip() if search_keyword else None,
         "search_mode": search_mode,
         "meal_type": meal_type,
@@ -154,6 +164,48 @@ def recipe_card(idx: int, r: dict, kcal_info: dict, cheer: str):
         with cols[2]:
             st.caption("管理栄養士AIからのひとこと")
             st.info(cheer)
+
+def recipe_combination_card(idx: int, combination: dict, cheer: str):
+    """複数レシピ組み合わせ表示用のカード"""
+    logger.debug(f"組み合わせカード{idx}表示: {combination['combination_name']}")
+    
+    with st.container(border=True):
+        # ヘッダー情報
+        st.markdown(f"### 🍽️ 組み合わせ {idx}: {combination['combination_name']}")
+        st.markdown(f"**合計カロリー: {int(combination['total_kcal'])} kcal** (組み合わせタイプ: {combination['type']})")
+        
+        # 各レシピの詳細を横並び表示
+        cols = st.columns(len(combination['recipes']))
+        
+        for i, recipe_info in enumerate(combination['recipes']):
+            recipe = recipe_info['recipe']
+            kcal_info = recipe_info['kcal_info']
+            recipe_type = recipe_info['type']
+            
+            with cols[i]:
+                # レシピタイプの表示
+                type_emoji = {"main": "🍚", "side": "🥗", "soup": "🍲", "other": "🍽️"}
+                st.markdown(f"{type_emoji.get(recipe_type, '🍽️')} **{recipe_type.upper()}**")
+                
+                # 画像表示
+                if recipe.get("foodImageUrl"):
+                    st.image(recipe["foodImageUrl"], width=150)
+                
+                # レシピ情報
+                st.markdown(f"**{recipe.get('recipeName', '(名称不明)')}**")
+                st.write(f"カロリー: **{int(kcal_info['kcal'])} kcal**")
+                st.write(f"P: {kcal_info['protein_g']:.1f}g")
+                st.write(f"F: {kcal_info['fat_g']:.1f}g") 
+                st.write(f"C: {kcal_info['carb_g']:.1f}g")
+                
+                # レシピリンク
+                if recipe.get("recipeUrl"):
+                    st.link_button("🔗 レシピ", recipe["recipeUrl"])
+        
+        # 応援メッセージ
+        st.markdown("---")
+        st.caption("💬 管理栄養士AIからのひとこと")
+        st.info(cheer)
 
 def weekly_table(rows: List[dict]):
     logger.info(f"週間献立テーブル表示 - {len(rows)}日分")

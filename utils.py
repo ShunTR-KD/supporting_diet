@@ -1275,3 +1275,133 @@ def fetch_top_recipes_by_genre_improved(genre: str, app_id: str) -> List[Dict[st
     except Exception as e:
         st.error(f"予期しないエラーが発生しました: {str(e)}")
         return []
+
+# ---- レシピ分類とコンビネーション機能 ----
+def classify_recipe_type(recipe_name: str, ingredients: List[str]) -> str:
+    """
+    レシピ名と材料からレシピタイプを分類する
+    
+    Args:
+        recipe_name: レシピ名
+        ingredients: 材料リスト
+    
+    Returns:
+        "main": 主食, "side": 副菜, "soup": 汁物, "other": その他
+    """
+    import constants as ct
+    
+    recipe_text = recipe_name.lower() + " " + " ".join(ingredients).lower()
+    
+    # 主食判定
+    for keyword in ct.MAIN_DISH_KEYWORDS:
+        if keyword in recipe_text:
+            return "main"
+    
+    # 汁物判定
+    for keyword in ct.SOUP_KEYWORDS:
+        if keyword in recipe_text:
+            return "soup"
+    
+    # 副菜判定
+    for keyword in ct.SIDE_DISH_KEYWORDS:
+        if keyword in recipe_text:
+            return "side"
+    
+    # デフォルトは主食として扱う
+    return "main"
+
+def find_recipe_combinations(recipes: List[Dict], kcal_infos: List[Dict], target_kcal: int, max_combinations: int = 3) -> List[Dict]:
+    """
+    主食+副菜の組み合わせを見つける
+    
+    Args:
+        recipes: レシピリスト
+        kcal_infos: カロリー情報リスト
+        target_kcal: 目標カロリー
+        max_combinations: 最大組み合わせ数
+    
+    Returns:
+        組み合わせ情報のリスト
+    """
+    logger.info(f"レシピ組み合わせ検索開始 - 目標カロリー: {target_kcal}kcal")
+    
+    # レシピを分類
+    classified_recipes = []
+    for i, (recipe, kcal_info) in enumerate(zip(recipes, kcal_infos)):
+        recipe_type = classify_recipe_type(
+            recipe.get('recipeName', ''),
+            recipe.get('recipeMaterial', [])
+        )
+        classified_recipes.append({
+            'index': i,
+            'recipe': recipe,
+            'kcal_info': kcal_info,
+            'type': recipe_type,
+            'kcal': kcal_info.get('kcal', 0)
+        })
+        logger.debug(f"レシピ分類: {recipe.get('recipeName', '')} → {recipe_type} ({kcal_info.get('kcal', 0)}kcal)")
+    
+    # タイプ別に分類
+    main_dishes = [r for r in classified_recipes if r['type'] == 'main']
+    side_dishes = [r for r in classified_recipes if r['type'] == 'side']
+    soups = [r for r in classified_recipes if r['type'] == 'soup']
+    others = [r for r in classified_recipes if r['type'] == 'other']
+    
+    logger.info(f"分類結果 - 主食:{len(main_dishes)}件, 副菜:{len(side_dishes)}件, 汁物:{len(soups)}件, その他:{len(others)}件")
+    
+    combinations = []
+    target_range = target_kcal + 100  # 許容上限
+    
+    # 主食+副菜の組み合わせ
+    for main in main_dishes:
+        for side in side_dishes:
+            total_kcal = main['kcal'] + side['kcal']
+            if total_kcal <= target_range:
+                combo = {
+                    'type': 'main+side',
+                    'recipes': [main, side],
+                    'total_kcal': total_kcal,
+                    'combination_name': f"{main['recipe'].get('recipeName', '')} + {side['recipe'].get('recipeName', '')}",
+                    'kcal_balance': abs(target_kcal - total_kcal)  # 目標からの差（少ない方が良い）
+                }
+                combinations.append(combo)
+                logger.debug(f"組み合わせ候補: {combo['combination_name']} ({total_kcal}kcal)")
+    
+    # 主食+副菜+汁物の組み合わせ
+    for main in main_dishes:
+        for side in side_dishes:
+            for soup in soups:
+                total_kcal = main['kcal'] + side['kcal'] + soup['kcal']
+                if total_kcal <= target_range:
+                    combo = {
+                        'type': 'main+side+soup',
+                        'recipes': [main, side, soup],
+                        'total_kcal': total_kcal,
+                        'combination_name': f"{main['recipe'].get('recipeName', '')} + {side['recipe'].get('recipeName', '')} + {soup['recipe'].get('recipeName', '')}",
+                        'kcal_balance': abs(target_kcal - total_kcal)
+                    }
+                    combinations.append(combo)
+                    logger.debug(f"3品組み合わせ候補: {combo['combination_name']} ({total_kcal}kcal)")
+    
+    # フォールバック: 主食のみ（既存レシピから最適なもの）
+    if not combinations:
+        logger.warning("適切な組み合わせが見つかりません。主食のみで提案します。")
+        for recipe_info in classified_recipes:
+            if recipe_info['kcal'] <= target_range:
+                combo = {
+                    'type': 'single',
+                    'recipes': [recipe_info],
+                    'total_kcal': recipe_info['kcal'],
+                    'combination_name': recipe_info['recipe'].get('recipeName', ''),
+                    'kcal_balance': abs(target_kcal - recipe_info['kcal'])
+                }
+                combinations.append(combo)
+    
+    # カロリーバランスでソート（目標カロリーに近い順）
+    combinations.sort(key=lambda x: x['kcal_balance'])
+    
+    # 最大件数でフィルタリング
+    result = combinations[:max_combinations]
+    logger.info(f"組み合わせ検索完了 - {len(result)}件の組み合わせを選定")
+    
+    return result

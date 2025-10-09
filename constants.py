@@ -16,6 +16,15 @@ MEAL_TYPES = ["朝", "昼", "晩"]
 DIFFICULTY_OPTIONS = ["初心者", "中級者"]
 GENRE_OPTIONS = ["和風", "洋風", "中華"]
 
+# 提案モードオプション
+PROPOSAL_MODES = ["1品提案", "主食+副菜提案"]
+DEFAULT_PROPOSAL_MODE = "1品提案"
+
+# レシピカテゴリ分類（主食・副菜の判定用）
+MAIN_DISH_KEYWORDS = ["ご飯", "パスタ", "うどん", "そば", "パン", "丼", "カレー", "チャーハン", "ピラフ", "リゾット"]
+SIDE_DISH_KEYWORDS = ["サラダ", "煮物", "炒め物", "おかず", "副菜", "付け合わせ", "野菜", "きんぴら", "胡麻和え"]
+SOUP_KEYWORDS = ["スープ", "汁物", "味噌汁", "吸い物", "コンソメ"]
+
 MEAL_ICONS = ":material/restaurant:"
 CUSTOM_ICONS = ":material/settings:"
 SCHEDULE_ICONS = ":material/calendar_today:"
